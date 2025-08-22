@@ -1,5 +1,13 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { generateQuestions } from '../gemini.js';
+import * as pdfjsLib from "pdfjs-dist";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.js",
+  import.meta.url
+).toString();
+
 
 const PdfUploadLanding = ({ onNavigateBack }) => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -25,216 +33,62 @@ const PdfUploadLanding = ({ onNavigateBack }) => {
   const timerRef = useRef(null);
   const testStartTime = useRef(null);
 
-  // Improved PDF text extraction with better filtering
+
+  // Extract text using pdf.js
   const tryExtractPDFText = async (file) => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const arrayBuffer = e.target.result;
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          // Convert to string for pattern matching
-          const pdfContent = new TextDecoder('latin1').decode(uint8Array);
-          let extractedText = '';
-          
-          // Method 1: Extract from stream objects (most common for text)
-          const streamPattern = /stream\s*([\s\S]*?)\s*endstream/gi;
-          const streamMatches = pdfContent.match(streamPattern);
-          
-          if (streamMatches) {
-            streamMatches.forEach(match => {
-              let streamContent = match.replace(/^stream\s*/i, '').replace(/\s*endstream$/i, '');
-              
-              // Try to decode if it's not compressed
-              if (!streamContent.includes('FlateDecode') && !streamContent.includes('Filter')) {
-                // Look for text commands in PDF streams
-                const textPattern = /\((.*?)\)\s*Tj/g;
-                const textMatches = streamContent.match(textPattern);
-                if (textMatches) {
-                  textMatches.forEach(textMatch => {
-                    const text = textMatch.replace(/^\(/, '').replace(/\)\s*Tj$/, '');
-                    if (text.length > 2 && /[a-zA-Z]/.test(text)) {
-                      extractedText += text + ' ';
-                    }
-                  });
-                }
-                
-                // Also look for simple text patterns
-                const simpleTextPattern = /[A-Za-z][A-Za-z\s]{5,}/g;
-                const simpleMatches = streamContent.match(simpleTextPattern);
-                if (simpleMatches) {
-                  simpleMatches.forEach(match => {
-                    if (!match.includes('endobj') && !match.includes('Filter') && !match.includes('Length')) {
-                      extractedText += match + ' ';
-                    }
-                  });
-                }
-              }
-            });
-          }
-          
-          // Method 2: Look for text outside of streams (sometimes text is stored directly)
-          const directTextPattern = /\((.*?)\)/g;
-          const directMatches = pdfContent.match(directTextPattern);
-          if (directMatches) {
-            directMatches.forEach(match => {
-              const text = match.replace(/^\(/, '').replace(/\)$/, '');
-              // Filter out PDF commands and metadata
-              if (text.length > 5 && 
-                  /[a-zA-Z]{3,}/.test(text) && 
-                  !text.includes('endobj') && 
-                  !text.includes('Filter') && 
-                  !text.includes('FlateDecode') &&
-                  !text.includes('Length') &&
-                  !text.includes('stream') &&
-                  !text.includes('/Type') &&
-                  !text.includes('/Font') &&
-                  !text.match(/^\d+\s+\d+\s+obj/)) {
-                extractedText += text + ' ';
-              }
-            });
-          }
-          
-          // Method 3: Look for readable text sequences in the binary data
-          let textBuffer = '';
-          for (let i = 0; i < uint8Array.length; i++) {
-            const char = uint8Array[i];
-            if (char >= 32 && char <= 126) { // Printable ASCII
-              textBuffer += String.fromCharCode(char);
-            } else if (char === 10 || char === 13) { // Newlines
-              textBuffer += ' ';
-            } else {
-              // Process accumulated text if it's substantial
-              if (textBuffer.length > 10) {
-                const words = textBuffer.trim().split(/\s+/);
-                const validWords = words.filter(word => 
-                  word.length > 2 && 
-                  /^[a-zA-Z]/.test(word) &&
-                  !word.includes('endobj') &&
-                  !word.includes('Filter') &&
-                  !word.includes('FlateDecode') &&
-                  !word.includes('Length') &&
-                  !word.includes('stream')
-                );
-                if (validWords.length > 2) {
-                  extractedText += textBuffer + ' ';
-                }
-              }
-              textBuffer = '';
-            }
-          }
-          
-          // Final cleanup and validation
-          if (extractedText.trim()) {
-            // Remove PDF-specific patterns that might have slipped through
-            extractedText = extractedText
-              .replace(/\b\d+\s+\d+\s+obj\b/g, '')
-              .replace(/\bendobj\b/g, '')
-              .replace(/\bFilter\s+FlateDecode\b/g, '')
-              .replace(/\bLength\s+\d+\b/g, '')
-              .replace(/\bstream\b/g, '')
-              .replace(/\bendstream\b/g, '')
-              .replace(/\b\/Type\b/g, '')
-              .replace(/\b\/Font\b/g, '')
-              .replace(/\b\/Page\b/g, '')
-              .replace(/\bxref\b/g, '')
-              .replace(/\btrailer\b/g, '')
-              .replace(/\bstartxref\b/g, '')
-              .replace(/%%EOF/g, '')
-              .replace(/\s{2,}/g, ' ') // Multiple spaces to single space
-              .replace(/(.)\1{4,}/g, '$1$1') // Remove excessive repeated characters
-              .trim();
-            
-            // Filter out lines that are mostly numbers or PDF metadata
-            const lines = extractedText.split(/[.!?]+/).filter(line => {
-              const words = line.trim().split(/\s+/);
-              if (words.length < 3) return false;
-              
-              const textWords = words.filter(word => 
-                /^[a-zA-Z]+$/.test(word) && 
-                word.length > 2
-              );
-              
-              // Keep lines that have at least 50% real words
-              return textWords.length / words.length >= 0.5;
-            });
-            
-            extractedText = lines.join('. ').trim();
-          }
-          
-          resolve(extractedText);
-        } catch (error) {
-          resolve('');
-        }
-      };
-      reader.onerror = () => resolve('');
-      reader.readAsArrayBuffer(file);
-    });
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      let extractedText = "";
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item) => item.str).join(" ");
+        extractedText += strings + "\n";
+      }
+
+      return extractedText.trim();
+    } catch (error) {
+      console.error("PDF extraction failed:", error);
+      return "";
+    }
   };
 
-  // Extract text from PDF using improved browser-based approach
+
+  // Wrapper with cleanup & fallback
   const extractTextFromPDF = async (file) => {
     setIsProcessing(true);
     setUploadProgress(0);
     setError(null);
-    
+
     try {
-      setUploadProgress(20);
-      
-      // Try to use improved PDF reading
+      setUploadProgress(30);
+
       const text = await tryExtractPDFText(file);
-      
+
       setUploadProgress(80);
-      
+
       if (text && text.trim().length > 50) {
         const cleanText = text
-          .replace(/\n{3,}/g, '\n\n')
-          .replace(/\s{2,}/g, ' ')
+          .replace(/\s{2,}/g, " ")
+          .replace(/\n{3,}/g, "\n\n")
           .trim();
 
         setExtractedText(cleanText);
         setUploadProgress(100);
         setError(null);
       } else {
-        // Fallback: Show instructions for manual text input
-        setError(`⚠️ PDF Text Extraction Issue
-
-The PDF appears to contain:
-• Compressed/encoded content that requires special decoding
-• Scanned images instead of selectable text
-• Complex formatting that's difficult to parse
-• Password protection or encryption
-
-💡 Quick Solutions:
-1. Try opening your PDF and copying the text manually (Ctrl+A, Ctrl+C)
-2. Use a simpler PDF without complex formatting
-3. Try the demo content below to test the system
-
-Paste your content in the text area below:`);
-        
-        // Show a text area for manual input
+        setError(
+          `⚠️ Could not extract readable text. \n        The PDF may contain scanned images or encrypted text. \n        Try copying the content manually or using another file.`
+        );
         setShowManualInput(true);
         setUploadProgress(100);
       }
-      
     } catch (err) {
-      console.error('Error extracting text from PDF:', err);
-      setError(`❌ PDF Processing Failed
-
-This could be due to:
-• Unsupported PDF format or version
-• File corruption during upload
-• Browser compatibility limitations
-• Complex PDF structure
-
-🔄 Try These Solutions:
-1. Use the demo content below to test the system
-2. Copy text manually from your PDF viewer
-3. Try a different PDF file
-4. Convert your PDF to a simpler format
-
-Use the text area below to paste your content:`);
+      console.error("Error extracting text from PDF:", err);
+      setError("❌ Failed to process PDF. Please try another file or paste text manually.");
       setShowManualInput(true);
       setUploadProgress(100);
     } finally {
@@ -412,14 +266,14 @@ Use the text area below to paste your content:`);
     setTestResults(results);
     
     // Save to localStorage
-    const existingHistory = JSON.parse(localStorage.getItem('testHistory') || '[]');
+    const existingHistory = JSON.parse(localStorage.getItem('testAttempts') || '[]');
     existingHistory.push({
       ...results,
       testDate: endTime.toLocaleDateString(),
       testTime: endTime.toLocaleTimeString()
     });
-    localStorage.setItem('testHistory', JSON.stringify(existingHistory));
-    
+    localStorage.setItem('testAttempts', JSON.stringify(existingHistory));
+
     setShowResults(true);
     
     // Exit fullscreen
