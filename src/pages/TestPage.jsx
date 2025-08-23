@@ -15,15 +15,7 @@ const TestPage = ({ extractedText, onNavigateBack }) => {
 
   // Enter fullscreen on component mount
   useEffect(() => {
-    const enterFullscreen = async () => {
-      try {
-        if (document.documentElement.requestFullscreen) {
-          await document.documentElement.requestFullscreen();
-        }
-      } catch (error) {
-        console.log('Fullscreen not supported or denied');
-      }
-    };
+    
     
     // Add fullscreen styles
     document.body.style.overflow = 'hidden';

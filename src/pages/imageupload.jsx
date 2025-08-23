@@ -194,6 +194,16 @@ const PdfUploadLanding = ({ onNavigateBack }) => {
 
     setIsLoadingQuestions(true);
     try {
+      const enterFullscreen = async () => {
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (error) {
+        console.log('Fullscreen not supported or denied');
+      }
+    };
+    enterFullscreen();
       const generatedQuestions = await generateQuestions(extractedText);
       setQuestions(generatedQuestions);
       setShowTest(true);
