@@ -769,7 +769,8 @@ const PdfUploadLanding = ({ onNavigateBack }) => {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              transition: 'all 0.3s ease'
+              transition: 'all 0.3s ease',
+              color: '#495057'
             }}
             onMouseEnter={(e) => {
               e.target.style.backgroundColor = '#e9ecef';
